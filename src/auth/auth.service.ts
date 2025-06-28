@@ -1,11 +1,18 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthDto } from './dto';
 import * as argon from 'argon2';
 
 @Injectable()
 export class AuthService {
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private jwt: JwtService,
+        private config: ConfigService,
+    ) {}
     async signup(dto: AuthDto) {
         // genrate the password hash
         const hash = await argon.hash(dto.password);
@@ -18,8 +25,8 @@ export class AuthService {
                 },
             });
 
-            const { hash: _, ...userWithoutHash } = user;
-            return userWithoutHash;
+            // send back the user
+            return await this.signToken(user.id, user.email);
         } catch (error) {
             if (error.code === 'P2002') {
                 throw new ForbiddenException('Credentials taken');
@@ -48,9 +55,28 @@ export class AuthService {
             throw new ForbiddenException('Password incorrect');
         }
 
-        const { hash: _, ...userWithoutHash } = user;
-
         // if everything goes well -> send back the user
-        return userWithoutHash;
+        return this.signToken(user.id, user.email);
+    }
+
+    async signToken(
+        userId: number,
+        email: string,
+    ): Promise<{ access_token: string }> {
+        const payload = {
+            sub: userId,
+            email,
+        };
+
+        const secret = this.config.get('JWT_SECRET');
+
+        const token = await this.jwt.signAsync(payload, {
+            expiresIn: '15m', // Token expires in 15 minutes
+            secret: secret, // Load secret key from environment variables
+        });
+
+        return {
+            access_token: token,
+        };
     }
 }
